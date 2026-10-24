@@ -1,0 +1,14 @@
+name = "samimi-taskboard"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+
+[[kv_namespaces]]
+binding = "TASK_KV"
+id = "b372463dd22848519e59cc983f0ea80f"
+
+[vars]
+TG_OWNER_ID = "93255700"
+BOT_USERNAME = "samimitodobot"
+
+[triggers]
+crons = ["* * * * *"]

@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>تسک‌برد رشاد</title>
+<style>
+:root{
+  --bg:#1c1f26; --bg2:#242832; --card:#262b36; --line:#353b48;
+  --txt:#d7dce4; --mut:#9aa3b2; --acc:#5aa9e6; --acc2:#7fc8a9;
+  --danger:#e06c75; --warn:#e5c07b;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:Tahoma,Vazirmatn,sans-serif;min-height:100vh}
+header{position:sticky;top:0;background:var(--bg2);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:12px 16px;z-index:10}
+header h1{font-size:18px;margin:0;flex:1}
+#burger{background:none;border:1px solid var(--line);color:var(--txt);font-size:20px;border-radius:8px;width:42px;height:42px;cursor:pointer}
+#drawer{position:fixed;top:0;right:-280px;width:260px;height:100%;background:var(--bg2);border-left:1px solid var(--line);transition:right .25s;padding:20px 16px;z-index:20}
+#drawer.open{right:0}
+#drawer button{display:block;width:100%;margin:8px 0;padding:10px;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:8px;cursor:pointer;font-size:14px}
+#drawer button:hover{border-color:var(--acc)}
+#scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;z-index:15}
+#scrim.open{display:block}
+main{max-width:640px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+input,select,textarea{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:10px;font-size:14px;font-family:inherit;margin:4px 0}
+textarea{resize:vertical;min-height:56px}
+.btn{background:var(--acc);border:none;color:#10131a;border-radius:8px;padding:10px 18px;font-size:14px;font-weight:bold;cursor:pointer;font-family:inherit}
+.btn.sec{background:var(--card);color:var(--txt);border:1px solid var(--line)}
+.row{display:flex;gap:8px}
+.row>*{flex:1}
+.task{display:flex;gap:10px;align-items:flex-start}
+.task .cb{width:24px;height:24px;margin-top:2px;accent-color:var(--acc2);flex:none;cursor:pointer}
+.task .body{flex:1;min-width:0}
+.task .title{font-size:15px;word-wrap:break-word}
+.task.done .title{text-decoration:line-through;color:var(--mut)}
+.task .meta{font-size:12px;color:var(--mut);margin-top:4px}
+.task .meta.over{color:var(--danger)}
+.task .acts{display:flex;gap:6px;margin-top:8px}
+.task .acts button{background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit}
+.task .acts button.del{color:var(--danger)}
+.prio{font-size:11px;border-radius:6px;padding:1px 8px;margin-right:6px}
+.p1{background:#2c3a2e;color:var(--acc2)} .p2{background:#2e3d4a;color:var(--acc)}
+.p3{background:#4a3f28;color:var(--warn)} .p4{background:#4a2b2e;color:var(--danger)}
+#loginBox{max-width:360px;margin:15vh auto;padding:24px}
+.hidden{display:none!important}
+#tgCode{font-size:28px;letter-spacing:6px;text-align:center;background:var(--bg);border:1px dashed var(--acc);border-radius:8px;padding:12px;margin:8px 0}
+.small{font-size:12px;color:var(--mut)}
+h2.sec{font-size:14px;color:var(--mut);margin:20px 0 8px}
+</style>
+</head>
+<body>
+<div id="scrim"></div>
+<nav id="drawer">
+  <div class="small">منو</div>
+  <button id="mTg">🤖 اتصال تلگرام</button>
+  <button id="mPass">🔑 تغییر رمز ورود</button>
+  <button id="mLogout">🚪 خروج</button>
+  <div class="small" id="tgStatus"></div>
+</nav>
+
+<header>
+  <button id="burger">☰</button>
+  <h1>📋 تسک‌برد رشاد</h1>
+</header>
+
+<main>
+  <div id="loginBox" class="card hidden">
+    <h2>ورود</h2>
+    <input type="password" id="pw" placeholder="رمز ورود" autocomplete="current-password">
+    <div class="row" style="margin-top:8px"><button class="btn" id="btnLogin">ورود</button></div>
+    <p class="small" id="loginErr"></p>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="card">
+      <input id="newTitle" placeholder="کار جدید… (مثلاً: خرید نان)">
+      <div class="row">
+        <input type="datetime-local" id="newDue">
+        <select id="newPrio">
+          <option value="1">اولویت ۱</option>
+          <option value="2">اولویت ۲</option>
+          <option value="3">اولویت ۳</option>
+          <option value="4">اولویت ۴ 🔥</option>
+        </select>
+      </div>
+      <div class="row" style="margin-top:8px"><button class="btn" id="btnAdd">＋ افزودن</button></div>
+    </div>
+
+    <h2 class="sec">باز (<span id="openCount">۰</span>)</h2>
+    <div id="openList"></div>
+    <h2 class="sec">انجام‌شده (<span id="doneCount">۰</span>)</h2>
+    <div id="doneList"></div>
+
+    <div class="card hidden" id="tgCard">
+      <h3>🤖 اتصال بات تلگرام</h3>
+      <p class="small">در بات <b id="botName">…</b> دستور زیر را بفرست:</p>
+      <p dir="ltr" style="text-align:center"><code id="tgCmd">/start</code></p>
+      <div id="tgCode">······</div>
+      <p class="small">کد ۱۰ دقیقه اعتبار دارد. یا مستقیم در بات <code>/start</code> بزن (chat خودکار ذخیره می‌شود).</p>
+    </div>
+
+    <div class="card hidden" id="passCard">
+      <h3>🔑 تغییر رمز ورود</h3>
+      <input type="password" id="oldPw" placeholder="رمز فعلی" autocomplete="current-password">
+      <input type="password" id="newPw" placeholder="رمز جدید (حداقل ۸ کاراکتر)" autocomplete="new-password">
+      <div class="row" style="margin-top:8px"><button class="btn" id="btnPass">تغییر رمز</button></div>
+      <p class="small" id="passMsg"></p>
+    </div>
+  </div>
+</main>
+
+<script>
+const API_BASE = "";
+const $ = (id) => document.getElementById(id);
+const faN = (n) => Number(n).toLocaleString("fa-IR");
+let TOKEN = localStorage.getItem("tb_token") || "";
+
+async function api(path, opts = {}) {
+  const r = await fetch(API_BASE + path, {
+    ...opts,
+    headers: { "content-type": "application/json", authorization: "Bearer " + TOKEN, ...(opts.headers || {}) },
+  });
+  if (r.status === 401) { logout(); throw new Error("unauth"); }
+  return r.json();
+}
+function logout() { TOKEN = ""; localStorage.removeItem("tb_token"); location.reload(); }
+
+function fmtDue(iso) {
+  if (!iso) return "بدون تاریخ";
+  const d = new Date(iso);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+function taskHtml(t) {
+  const over = !t.done && t.due && new Date(t.due).getTime() < Date.now();
+  return `<div class="card task ${t.done?"done":""}">
+    <input type="checkbox" class="cb" ${t.done?"checked":""} data-act="toggle" data-id="${t.id}">
+    <div class="body">
+      <div class="title">${esc(t.title)}<span class="prio p${t.priority}">P${t.priority}</span></div>
+      ${t.desc?`<div class="small">${esc(t.desc)}</div>`:""}
+      <div class="meta ${over?"over":""}">⏰ ${fmtDue(t.due)}</div>
+      <div class="acts">
+        <button data-act="edit" data-id="${t.id}">✏️ ویرایش</button>
+        <button class="del" data-act="del" data-id="${t.id}">🗑 حذف</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function load() {
+  const d = await api("/api/tasks");
+  const ts = d.tasks || [];
+  const open = ts.filter(t=>!t.done), done = ts.filter(t=>t.done);
+  $("openCount").textContent = faN(open.length);
+  $("doneCount").textContent = faN(done.length);
+  $("openList").innerHTML = open.map(taskHtml).join("") || '<p class="small">کاری نیست 🎉</p>';
+  $("doneList").innerHTML = done.slice(0,20).map(taskHtml).join("");
+}
+
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-act]");
+  if (!b) return;
+  const id = b.dataset.id, act = b.dataset.act;
+  if (act === "toggle") {
+    await api("/api/tasks/"+id, {method:"PATCH", body:JSON.stringify({done:b.checked})});
+    load();
+  } else if (act === "del") {
+    if (!confirm("حذف شود؟")) { load(); return; }
+    await api("/api/tasks/"+id, {method:"DELETE"});
+    load();
+  } else if (act === "edit") {
+    const t = (await api("/api/tasks")).tasks.find(x=>x.id===id);
+    if (!t) return;
+    const nt = prompt("عنوان:", t.title);
+    if (nt === null) return;
+    const nd = prompt("توضیح:", t.desc || "");
+    await api("/api/tasks/"+id, {method:"PATCH", body:JSON.stringify({title:nt, desc:nd||""})});
+    load();
+  }
+});
+
+$("btnAdd").onclick = async () => {
+  const title = $("newTitle").value.trim();
+  if (!title) return;
+  const dv = $("newDue").value;
+  await api("/api/tasks", {method:"POST", body:JSON.stringify({
+    title, due: dv ? new Date(dv).toISOString() : null, priority: +$("newPrio").value })});
+  $("newTitle").value = ""; $("newDue").value = "";
+  load();
+};
+
+$("btnLogin").onclick = async () => {
+  const password = $("pw").value;
+  const r = await fetch(API_BASE + "/api/login", {method:"POST",
+    headers:{"content-type":"application/json"}, body:JSON.stringify({password})});
+  const d = await r.json();
+  if (d.ok) {
+    TOKEN = d.token; localStorage.setItem("tb_token", TOKEN);
+    boot();
+    if (d.first) alert("🎉 خوش آمدی! این اولین ورود است — از منو بات تلگرام را وصل کن.");
+  } else $("loginErr").textContent = "رمز اشتباه است.";
+};
+$("pw").addEventListener("keydown", e=>{ if(e.key==="Enter") $("btnLogin").click(); });
+
+$("burger").onclick = () => { $("drawer").classList.add("open"); $("scrim").classList.add("open"); };
+$("scrim").onclick = () => { $("drawer").classList.remove("open"); $("scrim").classList.remove("open"); };
+$("mLogout").onclick = logout;
+$("mPass").onclick = () => {
+  $("passCard").classList.toggle("hidden"); $("tgCard").classList.add("hidden");
+  $("drawer").classList.remove("open"); $("scrim").classList.remove("open");
+  $("passCard").scrollIntoView({behavior:"smooth"});
+};
+$("mTg").onclick = async () => {
+  $("tgCard").classList.toggle("hidden"); $("passCard").classList.add("hidden");
+  $("drawer").classList.remove("open"); $("scrim").classList.remove("open");
+  if (!$("tgCard").classList.contains("hidden")) {
+    const d = await api("/api/tg/link-code", {method:"POST"});
+    $("botName").textContent = "@" + (d.bot || "");
+    $("tgCmd").textContent = "/start " + d.code;
+    $("tgCode").textContent = d.code;
+  }
+};
+$("btnPass").onclick = async () => {
+  const d = await api("/api/change-password", {method:"POST",
+    body:JSON.stringify({old:$("oldPw").value, new:$("newPw").value})});
+  $("passMsg").textContent = d.ok ? "✅ رمز عوض شد." : ("❌ " + (d.error || "خطا"));
+  if (d.ok) { $("oldPw").value=""; $("newPw").value=""; }
+};
+
+async function boot() {
+  try {
+    await api("/api/me");
+  } catch { $("loginBox").classList.remove("hidden"); return; }
+  $("loginBox").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  load();
+  const s = await api("/api/tg/status").catch(()=>null);
+  if (s) $("tgStatus").textContent = s.linked ? "🤖 بات: وصل ✅" : "🤖 بات: وصل نیست";
+}
+boot();
+</script>
+</body>
+</html>
