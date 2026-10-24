@@ -1,9 +1,9 @@
 export const INDEX_HTML = `<!DOCTYPE html>
-<html lang="fa" dir="rtl">
+<html lang="fa" dir="rtl" style="background:#1c1f26">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>تسک‌برد رشاد</title>
+<title>تسکبرد رشاد</title>
 <style>
 :root{
   --bg:#1c1f26; --bg2:#242832; --card:#262b36; --line:#353b48;
@@ -27,6 +27,7 @@ input,select,textarea{width:100%;background:var(--bg);border:1px solid var(--lin
 textarea{resize:vertical;min-height:56px}
 .btn{background:var(--acc);border:none;color:#10131a;border-radius:8px;padding:10px 18px;font-size:14px;font-weight:bold;cursor:pointer;font-family:inherit}
 .btn.sec{background:var(--card);color:var(--txt);border:1px solid var(--line)}
+.btn:disabled{opacity:.6;cursor:wait}
 .row{display:flex;gap:8px}
 .row>*{flex:1}
 .task{display:flex;gap:10px;align-items:flex-start}
@@ -47,6 +48,13 @@ textarea{resize:vertical;min-height:56px}
 #tgCode{font-size:28px;letter-spacing:6px;text-align:center;background:var(--bg);border:1px dashed var(--acc);border-radius:8px;padding:12px;margin:8px 0}
 .small{font-size:12px;color:var(--mut)}
 h2.sec{font-size:14px;color:var(--mut);margin:20px 0 8px}
+#boot{max-width:360px;margin:15vh auto;text-align:center;color:var(--mut)}
+.spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;margin:0 auto 12px;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.skel{background:linear-gradient(90deg,var(--card) 25%,var(--bg2) 50%,var(--card) 75%);background-size:200% 100%;animation:sk 1.2s infinite;border-radius:12px;min-height:78px;margin-bottom:12px;border:1px solid var(--line)}
+@keyframes sk{to{background-position:-200% 0}}
+#openList,#doneList{min-height:40px}
+.err{color:var(--danger);font-size:12px}
 </style>
 </head>
 <body>
@@ -61,10 +69,12 @@ h2.sec{font-size:14px;color:var(--mut);margin:20px 0 8px}
 
 <header>
   <button id="burger">☰</button>
-  <h1>📋 تسک‌برد رشاد</h1>
+  <h1>📋 تسکبرد رشاد</h1>
 </header>
 
 <main>
+  <div id="boot"><div class="spin"></div>در حال بارگذاری…</div>
+
   <div id="loginBox" class="card hidden">
     <h2>ورود</h2>
     <input type="password" id="pw" placeholder="رمز ورود" autocomplete="current-password">
@@ -74,7 +84,7 @@ h2.sec{font-size:14px;color:var(--mut);margin:20px 0 8px}
 
   <div id="app" class="hidden">
     <div class="card">
-      <input id="newTitle" placeholder="کار جدید… (مثلاً: خرید نان)">
+      <input id="newTitle" placeholder="کار جدید... (مثلاً: خرید نان)">
       <div class="row">
         <input type="datetime-local" id="newDue">
         <select id="newPrio">
@@ -84,20 +94,20 @@ h2.sec{font-size:14px;color:var(--mut);margin:20px 0 8px}
           <option value="4">اولویت ۴ 🔥</option>
         </select>
       </div>
-      <div class="row" style="margin-top:8px"><button class="btn" id="btnAdd">＋ افزودن</button></div>
+      <div class="row" style="margin-top:8px"><button class="btn" id="btnAdd">+ افزودن</button></div>
     </div>
 
     <h2 class="sec">باز (<span id="openCount">۰</span>)</h2>
     <div id="openList"></div>
-    <h2 class="sec">انجام‌شده (<span id="doneCount">۰</span>)</h2>
+    <h2 class="sec">انجامشده (<span id="doneCount">۰</span>)</h2>
     <div id="doneList"></div>
 
     <div class="card hidden" id="tgCard">
       <h3>🤖 اتصال بات تلگرام</h3>
-      <p class="small">در بات <b id="botName">…</b> دستور زیر را بفرست:</p>
+      <p class="small">در بات <b id="botName">...</b> دستور زیر را بفرست:</p>
       <p dir="ltr" style="text-align:center"><code id="tgCmd">/start</code></p>
       <div id="tgCode">······</div>
-      <p class="small">کد ۱۰ دقیقه اعتبار دارد. یا مستقیم در بات <code>/start</code> بزن (chat خودکار ذخیره می‌شود).</p>
+      <p class="small">کد ۱۰ دقیقه اعتبار دارد. یا مستقیم در بات <code>/start</code> بزن (chat خودکار ذخیره میشود).</p>
     </div>
 
     <div class="card hidden" id="passCard">
@@ -115,16 +125,37 @@ const API_BASE = "";
 const $ = (id) => document.getElementById(id);
 const faN = (n) => Number(n).toLocaleString("fa-IR");
 let TOKEN = localStorage.getItem("tb_token") || "";
+let CACHE = [];
+let booting = false;
+const SKEL = '<div class="skel"></div><div class="skel"></div>';
+
+function showLogin(msg) {
+  $("boot").classList.add("hidden");
+  $("app").classList.add("hidden");
+  $("loginBox").classList.remove("hidden");
+  if (msg) $("loginErr").textContent = msg;
+  setTimeout(() => $("pw").focus(), 50);
+}
+function showApp() {
+  $("boot").classList.add("hidden");
+  $("loginBox").classList.add("hidden");
+  $("app").classList.remove("hidden");
+}
+function logout(silent) {
+  TOKEN = ""; localStorage.removeItem("tb_token"); CACHE = [];
+  if ($("app").classList.contains("hidden")) { showLogin(); return; }
+  if (silent) { showLogin(); return; }
+  location.reload();
+}
 
 async function api(path, opts = {}) {
   const r = await fetch(API_BASE + path, {
     ...opts,
     headers: { "content-type": "application/json", authorization: "Bearer " + TOKEN, ...(opts.headers || {}) },
   });
-  if (r.status === 401) { logout(); throw new Error("unauth"); }
+  if (r.status === 401) { logout(true); throw new Error("unauth"); }
   return r.json();
 }
-function logout() { TOKEN = ""; localStorage.removeItem("tb_token"); location.reload(); }
 
 function fmtDue(iso) {
   if (!iso) return "بدون تاریخ";
@@ -150,14 +181,26 @@ function taskHtml(t) {
   </div>\`;
 }
 
-async function load() {
-  const d = await api("/api/tasks");
-  const ts = d.tasks || [];
+function renderTasks(ts) {
+  CACHE = ts;
   const open = ts.filter(t=>!t.done), done = ts.filter(t=>t.done);
   $("openCount").textContent = faN(open.length);
   $("doneCount").textContent = faN(done.length);
   $("openList").innerHTML = open.map(taskHtml).join("") || '<p class="small">کاری نیست 🎉</p>';
   $("doneList").innerHTML = done.slice(0,20).map(taskHtml).join("");
+  try { localStorage.setItem("tb_cache", JSON.stringify(ts.slice(0,100))); } catch {}
+}
+
+async function load() {
+  const d = await api("/api/tasks");
+  renderTasks(d.tasks || []);
+}
+
+async function refreshTgStatus() {
+  try {
+    const s = await api("/api/tg/status");
+    $("tgStatus").textContent = s.linked ? "🤖 بات: وصل ✅" : "🤖 بات: وصل نیست";
+  } catch {}
 }
 
 document.addEventListener("click", async (e) => {
@@ -165,80 +208,118 @@ document.addEventListener("click", async (e) => {
   if (!b) return;
   const id = b.dataset.id, act = b.dataset.act;
   if (act === "toggle") {
-    await api("/api/tasks/"+id, {method:"PATCH", body:JSON.stringify({done:b.checked})});
-    load();
+    const prev = b.checked;
+    b.disabled = true;
+    try {
+      await api("/api/tasks/"+id, {method:"PATCH", body:JSON.stringify({done:prev})});
+      await load();
+    } catch { b.checked = !prev; b.disabled = false; }
   } else if (act === "del") {
-    if (!confirm("حذف شود؟")) { load(); return; }
-    await api("/api/tasks/"+id, {method:"DELETE"});
-    load();
+    if (!confirm("حذف شود؟")) return;
+    b.disabled = true;
+    try { await api("/api/tasks/"+id, {method:"DELETE"}); await load(); }
+    catch { b.disabled = false; }
   } else if (act === "edit") {
-    const t = (await api("/api/tasks")).tasks.find(x=>x.id===id);
+    const t = CACHE.find(x=>x.id===id);
     if (!t) return;
     const nt = prompt("عنوان:", t.title);
-    if (nt === null) return;
+    if (nt === null || !nt.trim()) return;
     const nd = prompt("توضیح:", t.desc || "");
-    await api("/api/tasks/"+id, {method:"PATCH", body:JSON.stringify({title:nt, desc:nd||""})});
-    load();
+    if (nd === null) return;
+    try {
+      await api("/api/tasks/"+id, {method:"PATCH", body:JSON.stringify({title:nt.trim(), desc:(nd||"").trim()})});
+      await load();
+    } catch {}
   }
 });
 
 $("btnAdd").onclick = async () => {
   const title = $("newTitle").value.trim();
-  if (!title) return;
-  const dv = $("newDue").value;
-  await api("/api/tasks", {method:"POST", body:JSON.stringify({
-    title, due: dv ? new Date(dv).toISOString() : null, priority: +$("newPrio").value })});
-  $("newTitle").value = ""; $("newDue").value = "";
-  load();
+  if (!title) { $("newTitle").focus(); return; }
+  const btn = $("btnAdd");
+  btn.disabled = true;
+  try {
+    const dv = $("newDue").value;
+    await api("/api/tasks", {method:"POST", body:JSON.stringify({
+      title, due: dv ? new Date(dv).toISOString() : null, priority: +$("newPrio").value })});
+    $("newTitle").value = ""; $("newDue").value = "";
+    await load();
+  } catch {} finally { btn.disabled = false; $("newTitle").focus(); }
 };
+$("newTitle").addEventListener("keydown", e=>{ if(e.key==="Enter") $("btnAdd").click(); });
 
 $("btnLogin").onclick = async () => {
   const password = $("pw").value;
-  const r = await fetch(API_BASE + "/api/login", {method:"POST",
-    headers:{"content-type":"application/json"}, body:JSON.stringify({password})});
-  const d = await r.json();
-  if (d.ok) {
-    TOKEN = d.token; localStorage.setItem("tb_token", TOKEN);
-    boot();
-    if (d.first) alert("🎉 خوش آمدی! این اولین ورود است — از منو بات تلگرام را وصل کن.");
-  } else $("loginErr").textContent = "رمز اشتباه است.";
+  if (!password) { $("pw").focus(); return; }
+  const btn = $("btnLogin");
+  btn.disabled = true; $("loginErr").textContent = "";
+  try {
+    const r = await fetch(API_BASE + "/api/login", {method:"POST",
+      headers:{"content-type":"application/json"}, body:JSON.stringify({password})});
+    const d = await r.json();
+    if (d.ok) {
+      TOKEN = d.token; localStorage.setItem("tb_token", TOKEN);
+      $("pw").value = "";
+      boot();
+      if (d.first) setTimeout(()=>alert("🎉 خوش آمدی! از منو بات تلگرام را وصل کن."), 300);
+    } else $("loginErr").textContent = "رمز اشتباه است.";
+  } catch {
+    $("loginErr").textContent = "خطای اتصال. دوباره تلاش کن.";
+  } finally { btn.disabled = false; }
 };
 $("pw").addEventListener("keydown", e=>{ if(e.key==="Enter") $("btnLogin").click(); });
 
 $("burger").onclick = () => { $("drawer").classList.add("open"); $("scrim").classList.add("open"); };
 $("scrim").onclick = () => { $("drawer").classList.remove("open"); $("scrim").classList.remove("open"); };
-$("mLogout").onclick = logout;
+$("mLogout").onclick = () => logout(false);
 $("mPass").onclick = () => {
+  const hidden = $("passCard").classList.contains("hidden");
   $("passCard").classList.toggle("hidden"); $("tgCard").classList.add("hidden");
   $("drawer").classList.remove("open"); $("scrim").classList.remove("open");
-  $("passCard").scrollIntoView({behavior:"smooth"});
+  if (hidden) { $("passCard").scrollIntoView({behavior:"smooth"}); setTimeout(()=>$("oldPw").focus(), 300); }
 };
 $("mTg").onclick = async () => {
+  const hidden = $("tgCard").classList.contains("hidden");
   $("tgCard").classList.toggle("hidden"); $("passCard").classList.add("hidden");
   $("drawer").classList.remove("open"); $("scrim").classList.remove("open");
-  if (!$("tgCard").classList.contains("hidden")) {
-    const d = await api("/api/tg/link-code", {method:"POST"});
-    $("botName").textContent = "@" + (d.bot || "");
-    $("tgCmd").textContent = "/start " + d.code;
-    $("tgCode").textContent = d.code;
+  if (hidden) {
+    $("tgCard").scrollIntoView({behavior:"smooth"});
+    try {
+      const d = await api("/api/tg/link-code", {method:"POST"});
+      $("botName").textContent = "@" + (d.bot || "");
+      $("tgCmd").textContent = "/start " + d.code;
+      $("tgCode").textContent = d.code;
+    } catch {}
   }
 };
 $("btnPass").onclick = async () => {
-  const d = await api("/api/change-password", {method:"POST",
-    body:JSON.stringify({old:$("oldPw").value, new:$("newPw").value})});
-  $("passMsg").textContent = d.ok ? "✅ رمز عوض شد." : ("❌ " + (d.error || "خطا"));
-  if (d.ok) { $("oldPw").value=""; $("newPw").value=""; }
+  const btn = $("btnPass");
+  if (($("newPw").value || "").length < 8) { $("passMsg").textContent = "❌ رمز جدید حداقل ۸ کاراکتر."; return; }
+  btn.disabled = true;
+  try {
+    const d = await api("/api/change-password", {method:"POST",
+      body:JSON.stringify({old:$("oldPw").value, new:$("newPw").value})});
+    $("passMsg").textContent = d.ok ? "✅ رمز عوض شد." : ("❌ " + (d.error || "خطا"));
+    if (d.ok) { $("oldPw").value=""; $("newPw").value=""; }
+  } catch {} finally { btn.disabled = false; }
 };
 
 async function boot() {
+  if (booting) return; booting = true;
   try {
-    await api("/api/me");
-  } catch { $("loginBox").classList.remove("hidden"); return; }
-  $("loginBox").classList.add("hidden");
-  $("app").classList.remove("hidden");
-  load();
-  const s = await api("/api/tg/status").catch(()=>null);
-  if (s) $("tgStatus").textContent = s.linked ? "🤖 بات: وصل ✅" : "🤖 بات: وصل نیست";
+    // no token → instant login screen, zero network
+    if (!TOKEN) { showLogin(); return; }
+    // token exists → show app shell immediately with cache + skeletons
+    showApp();
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem("tb_cache") || "null"); } catch {}
+    if (cached && cached.length) renderTasks(cached);
+    else { $("openList").innerHTML = SKEL; $("doneList").innerHTML = ""; }
+    try {
+      await api("/api/me");
+    } catch { showLogin("نشست منقضی شد، دوباره وارد شو."); return; }
+    await Promise.all([load().catch(()=>{}), refreshTgStatus()]);
+  } finally { booting = false; }
 }
 boot();
 </script>
