@@ -1,4 +1,6 @@
 name: nightly-backup
+permissions:
+  contents: write
 on:
   schedule:
     - cron: "0 23 * * *"
