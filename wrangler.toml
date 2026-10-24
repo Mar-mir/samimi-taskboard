@@ -6,6 +6,11 @@ compatibility_date = "2025-01-01"
 binding = "TASK_KV"
 id = "b372463dd22848519e59cc983f0ea80f"
 
+[[d1_databases]]
+binding = "TASK_DB"
+database_name = "taskboard-db"
+database_id = "05967b65-281b-42c2-a8a0-01c5060db713"
+
 [vars]
 TG_OWNER_ID = "93255700"
 BOT_USERNAME = "samimitodobot"

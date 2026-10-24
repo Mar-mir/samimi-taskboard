@@ -42,22 +42,85 @@ async function getSession(env, req) {
   return s;
 }
 
-/* ---------- tasks ---------- */
-async function loadTasks(env) {
-  return await kvGet(env, "tasks:all", {});
+/* ---------- tasks (D1/SQLite, KV fallback) ---------- */
+const COLS = "id,title,descr,due,priority,done,r10,rdue,created_at,updated_at";
+function row2task(x) {
+  return {
+    id: x.id,
+    title: x.title,
+    desc: x.descr || "",
+    due: x.due || null,
+    priority: x.priority,
+    done: !!x.done,
+    r10: !!x.r10,
+    rDue: !!x.rdue,
+    createdAt: x.created_at,
+    updatedAt: x.updated_at,
+  };
 }
-async function saveTasks(env, t) {
-  await kvPut(env, "tasks:all", t);
+function useD1(env) { return !!env.TASK_DB; }
+async function dbAllTasks(env) {
+  if (!useD1(env)) {
+    const map = await kvGet(env, "tasks:all", {});
+    const arr = Object.values(map);
+    const open = arr.filter((t) => !t.done).sort((a, b) => ((a.due || "~") < (b.due || "~") ? -1 : 1));
+    const done = arr.filter((t) => t.done).sort((a, b) => ((b.updatedAt || "") < (a.updatedAt || "") ? -1 : 1));
+    return [...open, ...done];
+  }
+  const r = await env.TASK_DB.prepare(
+    `SELECT ${COLS} FROM tasks ORDER BY done ASC, (due IS NULL) ASC, due ASC, updated_at DESC`
+  ).all();
+  return (r.results || []).map(row2task);
 }
-function sortedTasks(map) {
-  const arr = Object.values(map);
-  const open = arr
-    .filter((t) => !t.done)
-    .sort((a, b) => ((a.due || "~") < (b.due || "~") ? -1 : 1));
-  const done = arr
-    .filter((t) => t.done)
-    .sort((a, b) => ((b.updatedAt || "") < (a.updatedAt || "") ? -1 : 1));
-  return [...open, ...done];
+async function dbGetTask(env, id) {
+  if (!useD1(env)) {
+    const map = await kvGet(env, "tasks:all", {});
+    return map[id] || null;
+  }
+  const r = await env.TASK_DB.prepare(`SELECT ${COLS} FROM tasks WHERE id = ?`).bind(id).first();
+  return r ? row2task(r) : null;
+}
+async function dbInsertTask(env, t) {
+  if (!useD1(env)) {
+    const map = await kvGet(env, "tasks:all", {});
+    map[t.id] = { ...t, done: false };
+    await kvPut(env, "tasks:all", map);
+    return;
+  }
+  await env.TASK_DB.prepare(
+    "INSERT INTO tasks (id,title,descr,due,priority,done,created_at,updated_at) VALUES (?,?,?,?,?,0,?,?)"
+  ).bind(t.id, t.title, t.desc || "", t.due || null, t.priority, t.createdAt, t.updatedAt).run();
+}
+async function dbUpdateTask(env, id, fields) {
+  if (!useD1(env)) {
+    const map = await kvGet(env, "tasks:all", {});
+    const t = map[id];
+    if (!t) return;
+    if (fields.title !== undefined) t.title = fields.title;
+    if (fields.descr !== undefined) t.desc = fields.descr;
+    if (fields.due !== undefined) { t.due = fields.due; t.r10 = false; t.rDue = false; }
+    if (fields.priority !== undefined) t.priority = fields.priority;
+    if (fields.done !== undefined) t.done = !!fields.done;
+    if (fields.r10 !== undefined) t.r10 = !!fields.r10;
+    if (fields.rdue !== undefined) t.rDue = !!fields.rdue;
+    t.updatedAt = new Date().toISOString();
+    await kvPut(env, "tasks:all", map);
+    return;
+  }
+  const keys = Object.keys(fields);
+  if (!keys.length) return;
+  const set = keys.map((k) => `${k} = ?`).join(", ");
+  await env.TASK_DB.prepare(`UPDATE tasks SET ${set}, updated_at = ? WHERE id = ?`)
+    .bind(...keys.map((k) => fields[k]), new Date().toISOString(), id).run();
+}
+async function dbDeleteTask(env, id) {
+  if (!useD1(env)) {
+    const map = await kvGet(env, "tasks:all", {});
+    delete map[id];
+    await kvPut(env, "tasks:all", map);
+    return;
+  }
+  await env.TASK_DB.prepare("DELETE FROM tasks WHERE id = ?").bind(id).run();
 }
 
 /* ---------- tehran time helpers (UTC+3:30) ---------- */
@@ -120,7 +183,6 @@ function escHtml(s) {
 }
 
 async function handleUpdate(env, upd) {
-  // callback buttons
   if (upd.callback_query) {
     const cq = upd.callback_query;
     const uid = String(cq.from && cq.from.id);
@@ -129,12 +191,9 @@ async function handleUpdate(env, upd) {
       return;
     }
     const [act, id] = String(cq.data || "").split(":");
-    const tasks = await loadTasks(env);
-    const t = tasks[id];
+    const t = await dbGetTask(env, id);
     if (act === "done" && t) {
-      t.done = true;
-      t.updatedAt = new Date().toISOString();
-      await saveTasks(env, tasks);
+      await dbUpdateTask(env, id, { done: 1 });
       await tgCall(env, "editMessageText", {
         chat_id: cq.message.chat.id,
         message_id: cq.message.message_id,
@@ -142,8 +201,7 @@ async function handleUpdate(env, upd) {
         parse_mode: "HTML",
       });
     } else if (act === "del" && t) {
-      delete tasks[id];
-      await saveTasks(env, tasks);
+      await dbDeleteTask(env, id);
       await tgCall(env, "editMessageText", {
         chat_id: cq.message.chat.id,
         message_id: cq.message.message_id,
@@ -181,7 +239,7 @@ async function handleUpdate(env, upd) {
     await kvPut(env, "cfg:tg_chat", { chat_id: chat, linkedAt: new Date().toISOString() });
     await tgCall(env, "sendMessage", {
       chat_id: chat,
-      text: "سلام رشاد 👋\n/new عنوان | تاریخ — ساخت تسک (تاریخ اختیاری: 20:30 یا فردا 8:00 یا 2026-10-25 20:00)\n/list — لیست بازها\n/done شماره — انجام شد\n/del شماره — حذف\n/today — کارهای امروز",
+      text: "سلام رشاد 👋\n/new عنوان | تاریخ — ساخت تسک (تاریخ اختیاری: 20:30 یا فردا 8:00 یا 2026-10-26 20:00)\n/list — لیست بازها\n/done شماره — انجام شد\n/del شماره — حذف\n/today — کارهای امروز",
     });
     return;
   }
@@ -197,7 +255,6 @@ async function handleUpdate(env, upd) {
       passhash: await sha256hex(salt + ":" + np),
       createdAt: new Date().toISOString(),
     });
-    // drop all sessions
     try {
       const list = await env.TASK_KV.list({ prefix: "sess:" });
       for (const k of list.keys) await env.TASK_KV.delete(k.name);
@@ -216,15 +273,13 @@ async function handleUpdate(env, upd) {
     if ((dueStr || "") && !due) {
       await tgCall(env, "sendMessage", {
         chat_id: chat,
-        text: "قالب تاریخ نامعتبر است. (20:30 | فردا 8:00 | 2026-10-25 20:00)",
+        text: "قالب تاریخ نامعتبر است. (20:30 | فردا 8:00 | 2026-10-26 20:00)",
       });
       return;
     }
-    const tasks = await loadTasks(env);
     const id = rid(8);
     const now = new Date().toISOString();
-    tasks[id] = { id, title, desc: "", due, priority: 1, done: false, createdAt: now, updatedAt: now };
-    await saveTasks(env, tasks);
+    await dbInsertTask(env, { id, title, desc: "", due, priority: 1, createdAt: now, updatedAt: now });
     await tgCall(env, "sendMessage", {
       chat_id: chat,
       text: `📝 <b>${escHtml(title)}</b>\n⏰ ${fmtDue(due)}`,
@@ -234,8 +289,7 @@ async function handleUpdate(env, upd) {
     return;
   }
   if (text.startsWith("/list") || text.startsWith("/today")) {
-    const tasks = await loadTasks(env);
-    let arr = sortedTasks(tasks).filter((t) => !t.done);
+    let arr = (await dbAllTasks(env)).filter((t) => !t.done);
     if (text.startsWith("/today")) {
       const t = new Date(Date.now() + TEH);
       const p = (n) => String(n).padStart(2, "0");
@@ -253,22 +307,19 @@ async function handleUpdate(env, upd) {
   if (text.startsWith("/done") || text.startsWith("/del")) {
     const isDel = text.startsWith("/del");
     const n = parseInt(text.split(/\s+/)[1] || "", 10);
-    const tasks = await loadTasks(env);
-    const arr = sortedTasks(tasks).filter((t) => !t.done);
+    const arr = (await dbAllTasks(env)).filter((t) => !t.done);
     const t = arr[n - 1];
     if (!t) {
       await tgCall(env, "sendMessage", { chat_id: chat, text: "شماره نامعتبر است. /list" });
       return;
     }
     if (isDel) {
-      delete tasks[t.id];
+      await dbDeleteTask(env, t.id);
       await tgCall(env, "sendMessage", { chat_id: chat, text: `🗑 ${t.title} حذف شد.` });
     } else {
-      t.done = true;
-      t.updatedAt = new Date().toISOString();
+      await dbUpdateTask(env, t.id, { done: 1 });
       await tgCall(env, "sendMessage", { chat_id: chat, text: `✅ ${t.title} انجام شد.` });
     }
-    await saveTasks(env, tasks);
     return;
   }
   await tgCall(env, "sendMessage", { chat_id: chat, text: "/new /list /today /done /del — راهنما: /start" });
@@ -278,11 +329,39 @@ async function handleUpdate(env, upd) {
 async function checkReminders(env) {
   const cfg = await kvGet(env, "cfg:tg_chat", null);
   if (!cfg) return;
-  const tasks = await loadTasks(env);
   const now = Date.now();
-  let changed = false;
-  for (const t of Object.values(tasks)) {
-    if (t.done || !t.due) continue;
+  if (!useD1(env)) {
+    const map = await kvGet(env, "tasks:all", {});
+    let changed = false;
+    for (const t of Object.values(map)) {
+      if (t.done || !t.due) continue;
+      const due = new Date(t.due).getTime();
+      if (!t.r10 && now >= due - 10 * 60e3 && now < due) {
+        await tgCall(env, "sendMessage", {
+          chat_id: cfg.chat_id,
+          text: `⏳ ۱۰ دقیقه تا <b>${escHtml(t.title)}</b>`,
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: taskKb(t.id) },
+        });
+        t.r10 = true; changed = true;
+      } else if (!t.rDue && now >= due) {
+        await tgCall(env, "sendMessage", {
+          chat_id: cfg.chat_id,
+          text: `🔔 وقت <b>${escHtml(t.title)}</b> رسید!`,
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: taskKb(t.id) },
+        });
+        t.rDue = true; changed = true;
+      }
+    }
+    if (changed) await kvPut(env, "tasks:all", map);
+    return;
+  }
+  const r = await env.TASK_DB.prepare(
+    `SELECT ${COLS} FROM tasks WHERE done = 0 AND due IS NOT NULL AND (r10 = 0 OR rdue = 0)`
+  ).all();
+  for (const x of r.results || []) {
+    const t = row2task(x);
     const due = new Date(t.due).getTime();
     if (!t.r10 && now >= due - 10 * 60e3 && now < due) {
       await tgCall(env, "sendMessage", {
@@ -291,8 +370,7 @@ async function checkReminders(env) {
         parse_mode: "HTML",
         reply_markup: { inline_keyboard: taskKb(t.id) },
       });
-      t.r10 = true;
-      changed = true;
+      await dbUpdateTask(env, t.id, { r10: 1 });
     } else if (!t.rDue && now >= due) {
       await tgCall(env, "sendMessage", {
         chat_id: cfg.chat_id,
@@ -300,11 +378,9 @@ async function checkReminders(env) {
         parse_mode: "HTML",
         reply_markup: { inline_keyboard: taskKb(t.id) },
       });
-      t.rDue = true;
-      changed = true;
+      await dbUpdateTask(env, t.id, { rdue: 1 });
     }
   }
-  if (changed) await saveTasks(env, tasks);
 }
 
 /* ---------- http ---------- */
@@ -318,7 +394,6 @@ export default {
     const method = req.method.toUpperCase();
     if (method === "OPTIONS") return new Response("", { status: 204, headers: CORS });
 
-    // telegram webhook (no auth — telegram calls it)
     if (path === "/api/tg/webhook" && method === "POST") {
       try {
         await handleUpdate(env, await req.json());
@@ -326,7 +401,6 @@ export default {
       return J({ ok: true });
     }
 
-    // login (also bootstraps password on first run via INIT_PASSWORD)
     if (path === "/api/login" && method === "POST") {
       const body = await req.json().catch(() => ({}));
       const password = body.password || "";
@@ -352,24 +426,23 @@ export default {
       return J({ ok: true, token });
     }
 
-    // backup export (token header, for github action)
     if (path === "/api/export" && method === "GET") {
       if (!env.BACKUP_TOKEN || req.headers.get("x-backup-token") !== env.BACKUP_TOKEN)
         return J({ ok: false }, 401);
-      return J({ ok: true, exportedAt: new Date().toISOString(), tasks: await loadTasks(env) });
+      const map = {};
+      for (const t of await dbAllTasks(env)) map[t.id] = t;
+      return J({ ok: true, exportedAt: new Date().toISOString(), tasks: map, engine: useD1(env) ? "d1" : "kv" });
     }
 
-    // frontend (public — login happens via api + token)
     if (method === "GET" && (path === "/" || path === "/index.html" || !path.startsWith("/api/")))
       return new Response(INDEX_HTML, {
         headers: { "content-type": "text/html; charset=utf-8" },
       });
 
-    // authed api
     const sess = await getSession(env, req);
     if (!sess) return J({ ok: false, error: "unauthorized" }, 401);
 
-    if (path === "/api/me") return J({ ok: true });
+    if (path === "/api/me") return J({ ok: true, engine: useD1(env) ? "d1" : "kv" });
 
     if (path === "/api/change-password" && method === "POST") {
       const body = await req.json().catch(() => ({}));
@@ -393,53 +466,44 @@ export default {
     }
 
     if (path === "/api/tasks" && method === "GET")
-      return J({ ok: true, tasks: sortedTasks(await loadTasks(env)) });
+      return J({ ok: true, tasks: await dbAllTasks(env) });
 
     if (path === "/api/tasks" && method === "POST") {
       const body = await req.json().catch(() => ({}));
       if (!body.title || !body.title.trim()) return J({ ok: false, error: "no-title" }, 400);
-      const tasks = await loadTasks(env);
       const id = rid(8);
       const now = new Date().toISOString();
-      tasks[id] = {
+      const t = {
         id,
         title: body.title.trim(),
         desc: (body.desc || "").trim(),
         due: body.due || null,
         priority: [1, 2, 3, 4].includes(body.priority) ? body.priority : 1,
-        done: false,
         createdAt: now,
         updatedAt: now,
       };
-      await saveTasks(env, tasks);
-      return J({ ok: true, task: tasks[id] });
+      await dbInsertTask(env, t);
+      return J({ ok: true, task: { ...t, done: false } });
     }
 
     const mTask = path.match(/^\/api\/tasks\/([0-9a-f]+)$/);
     if (mTask) {
       const id = mTask[1];
-      const tasks = await loadTasks(env);
-      const t = tasks[id];
+      const t = await dbGetTask(env, id);
       if (!t) return J({ ok: false, error: "not-found" }, 404);
       if (method === "PATCH") {
         const body = await req.json().catch(() => ({}));
-        if (body.title !== undefined) t.title = String(body.title).trim();
-        if (body.desc !== undefined) t.desc = String(body.desc);
-        if (body.due !== undefined) {
-          t.due = body.due || null;
-          t.r10 = false;
-          t.rDue = false;
-        }
-        if (body.priority !== undefined && [1, 2, 3, 4].includes(body.priority))
-          t.priority = body.priority;
-        if (body.done !== undefined) t.done = !!body.done;
-        t.updatedAt = new Date().toISOString();
-        await saveTasks(env, tasks);
-        return J({ ok: true, task: t });
+        const f = {};
+        if (body.title !== undefined) f.title = String(body.title).trim();
+        if (body.desc !== undefined) f.descr = String(body.desc);
+        if (body.due !== undefined) { f.due = body.due || null; f.r10 = 0; f.rdue = 0; }
+        if (body.priority !== undefined && [1, 2, 3, 4].includes(body.priority)) f.priority = body.priority;
+        if (body.done !== undefined) f.done = body.done ? 1 : 0;
+        await dbUpdateTask(env, id, f);
+        return J({ ok: true, task: await dbGetTask(env, id) });
       }
       if (method === "DELETE") {
-        delete tasks[id];
-        await saveTasks(env, tasks);
+        await dbDeleteTask(env, id);
         return J({ ok: true });
       }
       return J({ ok: false }, 405);
